@@ -1,5 +1,6 @@
 package br.unicamp.padroesestruturais.legacy;
 
+import br.unicamp.padroesestruturais.legacy.decorator.TipoAjuste;
 import br.unicamp.padroesestruturais.legacy.domain.FormaPagamento;
 import br.unicamp.padroesestruturais.legacy.domain.Pedido;
 import br.unicamp.padroesestruturais.legacy.domain.ResultadoCobranca;
@@ -57,13 +58,9 @@ public class Main {
         FormaPagamento forma = selecionarFormaPagamento(scanner);
         if (forma == null) return;
 
-        boolean descontoFidelidade = perguntarSimNao(scanner, "Aplicar desconto de fidelidade (5%)?");
-        boolean jurosParcelamento = perguntarSimNao(scanner, "Aplicar juros de parcelamento (2,99%)?");
-        boolean taxaInternacional = perguntarSimNao(scanner, "Aplicar taxa de operacao internacional (5%)?");
-        boolean seguro = perguntarSimNao(scanner, "Aplicar seguro de transacao (R$ 4,90)?");
+        List<TipoAjuste> ajustes = selecionarAjustes(scanner);
 
-        ResultadoCobranca resultado = service.cobrar(pedido, forma,
-                descontoFidelidade, jurosParcelamento, taxaInternacional, seguro);
+        ResultadoCobranca resultado = service.cobrar(pedido, forma, ajustes);
 
         System.out.println();
         exibirResultado(pedido, resultado);
@@ -73,13 +70,9 @@ public class Main {
         FormaPagamento forma = selecionarFormaPagamento(scanner);
         if (forma == null) return;
 
-        boolean descontoFidelidade = perguntarSimNao(scanner, "Aplicar desconto de fidelidade (5%)?");
-        boolean jurosParcelamento = perguntarSimNao(scanner, "Aplicar juros de parcelamento (2,99%)?");
-        boolean taxaInternacional = perguntarSimNao(scanner, "Aplicar taxa de operacao internacional (5%)?");
-        boolean seguro = perguntarSimNao(scanner, "Aplicar seguro de transacao (R$ 4,90)?");
+        List<TipoAjuste> ajustes = selecionarAjustes(scanner);
 
-        List<ResultadoCobranca> resultados = service.cobrarEmLote(pedidos, forma,
-                descontoFidelidade, jurosParcelamento, taxaInternacional, seguro);
+        List<ResultadoCobranca> resultados = service.cobrarEmLote(pedidos, forma, ajustes);
 
         System.out.println();
         for (int i = 0; i < pedidos.size(); i++) {
@@ -138,6 +131,36 @@ public class Main {
                 yield null;
             }
         };
+    }
+
+    /**
+     * Monta a lista de ajustes escolhidos pelo usuário, na ordem em que são
+     * perguntados. Adicionar um novo ajuste aqui não altera a assinatura de
+     * nenhum método do CobrancaService — apenas cresce esta lista.
+     */
+    private static List<TipoAjuste> selecionarAjustes(Scanner scanner) {
+        List<TipoAjuste> ajustes = new ArrayList<>();
+
+        if (perguntarSimNao(scanner, "Aplicar desconto de fidelidade (5%)?")) {
+            ajustes.add(TipoAjuste.DESCONTO_FIDELIDADE);
+        }
+        if (perguntarSimNao(scanner, "Aplicar juros de parcelamento (2,99%)?")) {
+            ajustes.add(TipoAjuste.JUROS_PARCELAMENTO);
+        }
+        if (perguntarSimNao(scanner, "Aplicar taxa de operacao internacional (5%)?")) {
+            ajustes.add(TipoAjuste.TAXA_INTERNACIONAL);
+        }
+        if (perguntarSimNao(scanner, "Aplicar seguro de transacao (R$ 4,90)?")) {
+            ajustes.add(TipoAjuste.SEGURO);
+        }
+        if (perguntarSimNao(scanner, "Aplicar taxa de antecipacao de recebiveis (1,5%)?")) {
+            ajustes.add(TipoAjuste.TAXA_ANTECIPACAO_RECEBIVEIS);
+        }
+        if (perguntarSimNao(scanner, "Aplicar taxa de emissao de nota fiscal (R$ 2,50)?")) {
+            ajustes.add(TipoAjuste.TAXA_EMISSAO_NF);
+        }
+
+        return ajustes;
     }
 
     private static boolean perguntarSimNao(Scanner scanner, String pergunta) {

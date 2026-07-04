@@ -31,52 +31,53 @@ public class CobrancaService {
 
     /**
      * Efetua a cobrança de um único pedido.
-     * Monta a cadeia do Decorator dinamicamente com os booleans enviados pela Main.
+     * A cadeia do Decorator é montada dinamicamente a partir da LISTA de ajustes
+     * escolhidos, na ordem em que aparecem — nenhum parâmetro booleano é usado,
+     * e novos ajustes não exigem alterar esta assinatura.
      */
-    public ResultadoCobranca cobrar(Pedido pedido, FormaPagamento forma, 
-                                    boolean descontoFidelidade, boolean jurosParcelamento, 
-                                    boolean taxaInternacional, boolean seguro) {
-        
-        // 1. Iniciamos a base do decorator injetando o valor bruto original do pedido
-        CalculadorValor calculador = new CalculadorValorBase(pedido.getValorBase());
+    public ResultadoCobranca cobrar(Pedido pedido, FormaPagamento forma, List<TipoAjuste> ajustes) {
 
-        // 2. Envelopamos dinamicamente na cadeia conforme as escolhas vindas da Main
-        // IMPORTANTE: Se o nome das suas classes de decorator na pasta 'decorator' 
-        // for ligeiramente diferente, ajuste os nomes dos "new" abaixo!
-        if (descontoFidelidade) {
-            calculador = new DescontoFidelidadeDecorator(calculador); 
-        }
-        if (jurosParcelamento) {
-            calculador = new JurosParcelamentoDecorator(calculador); 
-        }
-        if (taxaInternacional) {
-            calculador = new TaxaInternacionalDecorator(calculador); 
-        }
-        if (seguro) {
-            calculador = new SeguroDecorator(calculador); 
-        }
-
-        // 3. Executa o método calcular() processando toda a cadeia de modificações de preço
+        CalculadorValor calculador = montarCadeiaDeAjustes(pedido, ajustes);
         double valorFinal = calculador.calcular();
 
-        // 4. Repassa para o gateway/adapter correto processar o pagamento
         return processarPagamento(pedido, valorFinal, forma);
     }
 
     /**
      * Efetua a cobrança em lote de todos os pedidos cadastrados na Main.
      */
-    public List<ResultadoCobranca> cobrarEmLote(List<Pedido> pedidos, FormaPagamento forma, 
-                                                boolean descontoFidelidade, boolean jurosParcelamento, 
-                                                boolean taxaInternacional, boolean seguro) {
+    public List<ResultadoCobranca> cobrarEmLote(List<Pedido> pedidos, FormaPagamento forma, List<TipoAjuste> ajustes) {
         List<ResultadoCobranca> resultados = new ArrayList<>();
 
         // Reaproveita a lógica de cobrança individual para cada item da lista
         for (Pedido pedido : pedidos) {
-            resultados.add(cobrar(pedido, forma, descontoFidelidade, jurosParcelamento, taxaInternacional, seguro));
+            resultados.add(cobrar(pedido, forma, ajustes));
         }
 
         return resultados;
+    }
+
+    /**
+     * Único ponto de montagem da cadeia de Decorators. Percorre a lista de
+     * ajustes solicitados, na ordem informada, envelopando o calculador a
+     * cada passo. Adicionar um novo ajuste = adicionar uma constante em
+     * TipoAjuste + um "case" aqui, sem tocar em cobrar/cobrarEmLote.
+     */
+    private CalculadorValor montarCadeiaDeAjustes(Pedido pedido, List<TipoAjuste> ajustes) {
+        CalculadorValor calculador = new CalculadorValorBase(pedido.getValorBase());
+
+        for (TipoAjuste ajuste : ajustes) {
+            calculador = switch (ajuste) {
+                case DESCONTO_FIDELIDADE -> new DescontoFidelidadeDecorator(calculador);
+                case JUROS_PARCELAMENTO -> new JurosParcelamentoDecorator(calculador);
+                case TAXA_INTERNACIONAL -> new TaxaInternacionalDecorator(calculador);
+                case SEGURO -> new SeguroDecorator(calculador);
+                case TAXA_ANTECIPACAO_RECEBIVEIS -> new TaxaAntecipacaoDecorator(calculador);
+                case TAXA_EMISSAO_NF -> new TaxaEmissaoNfDecorator(calculador);
+            };
+        }
+
+        return calculador;
     }
     
     /**
