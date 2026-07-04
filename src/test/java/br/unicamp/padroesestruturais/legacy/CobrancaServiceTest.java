@@ -1,5 +1,6 @@
 package br.unicamp.padroesestruturais.legacy;
 
+import br.unicamp.padroesestruturais.legacy.decorator.*;
 import br.unicamp.padroesestruturais.legacy.domain.FormaPagamento;
 import br.unicamp.padroesestruturais.legacy.domain.Pedido;
 import br.unicamp.padroesestruturais.legacy.domain.ResultadoCobranca;
@@ -25,6 +26,7 @@ class CobrancaServiceTest {
 
     @Test
     void deveCobrarViaBoletoSemAjustes() {
+        // Passa false para todas as taxas e descontos
         ResultadoCobranca resultado = service.cobrar(pedido, FormaPagamento.BOLETO, false, false, false, false);
 
         assertEquals("APROVADA", resultado.getStatus());
@@ -52,7 +54,6 @@ class CobrancaServiceTest {
     @Test
     void deveRecusarCartaoCreditoParaValorAcimaDoLimite() {
         Pedido pedidoCaro = new Pedido("PED-003", "Construtora ABC Ltda", "Servidor", 15000.0);
-
         ResultadoCobranca resultado = service.cobrar(pedidoCaro, FormaPagamento.CARTAO_CREDITO, false, false, false, false);
 
         assertEquals("RECUSADA", resultado.getStatus());
@@ -66,37 +67,57 @@ class CobrancaServiceTest {
 
     @Test
     void naoAplicarNenhumAjusteMantemValorBase() {
-        double valor = service.calcularValorFinal(1000.0, false, false, false, false);
+        CalculadorValor calculo = new CalculadorValorBase(pedido.getValorBase()); // Pedido vale 1000.0
+        double valor = calculo.calcular();
+        
         assertEquals(1000.0, valor, 0.001);
     }
 
     @Test
     void deveAplicarDescontoDeFidelidade() {
-        double valor = service.calcularValorFinal(1000.0, true, false, false, false);
+        CalculadorValor calculo = new CalculadorValorBase(pedido.getValorBase());
+        calculo = new DescontoFidelidadeDecorator(calculo);
+        
+        double valor = calculo.calcular();
         assertEquals(950.0, valor, 0.001);
     }
 
     @Test
     void deveAplicarJurosDeParcelamento() {
-        double valor = service.calcularValorFinal(1000.0, false, true, false, false);
+        CalculadorValor calculo = new CalculadorValorBase(pedido.getValorBase());
+        calculo = new JurosParcelamentoDecorator(calculo);
+        
+        double valor = calculo.calcular();
         assertEquals(1029.9, valor, 0.001);
     }
 
     @Test
     void deveAplicarTaxaInternacional() {
-        double valor = service.calcularValorFinal(1000.0, false, false, true, false);
+        CalculadorValor calculo = new CalculadorValorBase(pedido.getValorBase());
+        calculo = new TaxaInternacionalDecorator(calculo);
+        
+        double valor = calculo.calcular();
         assertEquals(1050.0, valor, 0.001);
     }
 
     @Test
     void deveAplicarSeguro() {
-        double valor = service.calcularValorFinal(1000.0, false, false, false, true);
+        CalculadorValor calculo = new CalculadorValorBase(pedido.getValorBase());
+        calculo = new SeguroDecorator(calculo);
+        
+        double valor = calculo.calcular();
         assertEquals(1004.90, valor, 0.001);
     }
 
     @Test
     void deveAplicarTodosOsAjustesNaOrdemDefinida() {
-        double valor = service.calcularValorFinal(1000.0, true, true, true, true);
+        CalculadorValor calculo = new CalculadorValorBase(pedido.getValorBase());
+        calculo = new DescontoFidelidadeDecorator(calculo);
+        calculo = new JurosParcelamentoDecorator(calculo);
+        calculo = new TaxaInternacionalDecorator(calculo);
+        calculo = new SeguroDecorator(calculo);
+
+        double valor = calculo.calcular();
 
         double esperado = 1000.0;
         esperado = esperado - (esperado * 0.05);
@@ -114,6 +135,7 @@ class CobrancaServiceTest {
                 new Pedido("PED-002", "Maria Santos", "Cadeira", 500.0)
         );
 
+        // Chama o cobrarEmLote passando os parâmetros booleanos corretos
         List<ResultadoCobranca> resultados = service.cobrarEmLote(pedidos, FormaPagamento.PIX, false, false, false, false);
 
         assertEquals(2, resultados.size());
@@ -129,6 +151,7 @@ class CobrancaServiceTest {
                 new Pedido("PED-002", "Maria Santos", "Cadeira", 2000.0)
         );
 
+        // Ativa apenas o primeiro booleano (Desconto Fidelidade) como true
         List<ResultadoCobranca> resultados = service.cobrarEmLote(pedidos, FormaPagamento.BOLETO, true, false, false, false);
 
         assertEquals(950.0, resultados.get(0).getValorCobrado(), 0.001);

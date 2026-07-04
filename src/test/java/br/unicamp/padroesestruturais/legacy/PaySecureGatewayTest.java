@@ -1,67 +1,61 @@
 package br.unicamp.padroesestruturais.legacy;
 
-import br.unicamp.padroesestruturais.legacy.externo.GatewayIndisponivelException;
-import br.unicamp.padroesestruturais.legacy.externo.PaySecureGateway;
-import br.unicamp.padroesestruturais.legacy.externo.TransacaoExterna;
+import br.unicamp.padroesestruturais.legacy.domain.FormaPagamento;
+import br.unicamp.padroesestruturais.legacy.domain.Pedido;
+import br.unicamp.padroesestruturais.legacy.domain.ResultadoCobranca;
+import br.unicamp.padroesestruturais.legacy.gateway.PaySecureGatewayAdapter;
 import org.junit.jupiter.api.Test;
-
-import java.util.HashMap;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class PaySecureGatewayTest {
 
     @Test
-    void deveAprovarTransacaoDentroDoLimite() throws GatewayIndisponivelException {
-        PaySecureGateway gateway = new PaySecureGateway();
+    void deveAprovarTransacaoDentroDoLimite() {
+        // Agora instanciamos o Adapter
+        PaySecureGatewayAdapter adapter = new PaySecureGatewayAdapter();
+        Pedido pedido = new Pedido("PED-001", "Joao Silva", "Item de Teste", 500.0);
 
-        Map<String, Object> dados = new HashMap<>();
-        dados.put("orderId", "PED-001");
-        dados.put("customerName", "Joao Silva");
-        dados.put("amount", 500.0);
-        dados.put("currency", "BRL");
+        // O adapter recebe o Pedido e formata o HashMap internamente
+        ResultadoCobranca resultado = adapter.processar(pedido, 500.0, FormaPagamento.CARTAO_CREDITO);
 
-        TransacaoExterna transacao = gateway.processarTransacao(dados);
-
-        assertEquals(200, transacao.getCodigoStatus());
-        assertNotNull(transacao.getReferenciaExterna());
-        assertTrue(transacao.getReferenciaExterna().startsWith("PSEC-"));
-        assertEquals(500.0, transacao.getValorProcessado());
-        assertEquals("BRL", transacao.getMoeda());
+        assertEquals("APROVADA", resultado.getStatus());
+        assertNotNull(resultado.getReferencia());
+        assertTrue(resultado.getReferencia().startsWith("PSEC-"));
+        assertEquals(500.0, resultado.getValorCobrado());
+        assertEquals(FormaPagamento.CARTAO_CREDITO, resultado.getFormaPagamento());
     }
 
     @Test
-    void deveRecusarTransacaoAcimaDoLimite() throws GatewayIndisponivelException {
-        PaySecureGateway gateway = new PaySecureGateway();
+    void deveRecusarTransacaoAcimaDoLimite() {
+        PaySecureGatewayAdapter adapter = new PaySecureGatewayAdapter();
+        Pedido pedido = new Pedido("PED-003", "Construtora ABC Ltda", "Servidor", 15000.0);
 
-        Map<String, Object> dados = new HashMap<>();
-        dados.put("orderId", "PED-003");
-        dados.put("customerName", "Construtora ABC Ltda");
-        dados.put("amount", 15000.0);
-        dados.put("currency", "BRL");
+        ResultadoCobranca resultado = adapter.processar(pedido, 15000.0, FormaPagamento.CARTAO_CREDITO);
 
-        TransacaoExterna transacao = gateway.processarTransacao(dados);
-
-        assertEquals(402, transacao.getCodigoStatus());
+        // O código 402 da API externa é traduzido para "RECUSADA"
+        assertEquals("RECUSADA", resultado.getStatus());
     }
 
     @Test
-    void deveLancarExcecaoParaValorInvalido() {
-        PaySecureGateway gateway = new PaySecureGateway();
+    void deveRecusarTransacaoParaValorInvalido() {
+        PaySecureGatewayAdapter adapter = new PaySecureGatewayAdapter();
+        Pedido pedido = new Pedido("PED-004", "Cliente", "Item", -10.0);
 
-        Map<String, Object> dados = new HashMap<>();
-        dados.put("orderId", "PED-004");
-        dados.put("amount", -10.0);
+        // O adapter captura a GatewayIndisponivelException e protege o sistema retornando "RECUSADA"
+        ResultadoCobranca resultado = adapter.processar(pedido, -10.0, FormaPagamento.CARTAO_CREDITO);
 
-        assertThrows(GatewayIndisponivelException.class, () -> gateway.processarTransacao(dados));
+        assertEquals("RECUSADA", resultado.getStatus());
     }
 
     @Test
-    void deveLancarExcecaoParaDadosIncompletos() {
-        PaySecureGateway gateway = new PaySecureGateway();
-        Map<String, Object> dados = new HashMap<>();
+    void deveRecusarParaDadosIncompletos() {
+        PaySecureGatewayAdapter adapter = new PaySecureGatewayAdapter();
+        // Criamos um pedido com dados nulos para simular a falha de dados incompletos na API externa
+        Pedido pedido = new Pedido(null, null, "Item", 100.0);
 
-        assertThrows(GatewayIndisponivelException.class, () -> gateway.processarTransacao(dados));
+        ResultadoCobranca resultado = adapter.processar(pedido, 100.0, FormaPagamento.CARTAO_CREDITO);
+
+        assertEquals("RECUSADA", resultado.getStatus());
     }
 }

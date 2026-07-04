@@ -1,12 +1,13 @@
 package br.unicamp.padroesestruturais.legacy.service;
 
+import br.unicamp.padroesestruturais.legacy.decorator.*;
 import br.unicamp.padroesestruturais.legacy.domain.FormaPagamento;
 import br.unicamp.padroesestruturais.legacy.domain.Pedido;
 import br.unicamp.padroesestruturais.legacy.domain.ResultadoCobranca;
-import br.unicamp.padroesestruturais.legacy.externo.GatewayIndisponivelException;
-import br.unicamp.padroesestruturais.legacy.externo.PaySecureGateway;
-import br.unicamp.padroesestruturais.legacy.externo.TransacaoExterna;
-import br.unicamp.padroesestruturais.legacy.gateway.GatewayPagamentoInterno;
+import br.unicamp.padroesestruturais.legacy.gateway.GatewayPagamento;
+import br.unicamp.padroesestruturais.legacy.gateway.GatewayPagamentoInternoAdapter;
+import br.unicamp.padroesestruturais.legacy.gateway.PaySecureGatewayAdapter;
+import br.unicamp.padroesestruturais.legacy.gateway.WalletPayAdapter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,113 +16,77 @@ import java.util.Map;
 
 public class CobrancaService {
 
-    private static final double TAXA_DESCONTO_FIDELIDADE = 0.05;
-    private static final double TAXA_JUROS_PARCELAMENTO = 0.0299;
-    private static final double TAXA_OPERACAO_INTERNACIONAL = 0.05;
-    private static final double VALOR_SEGURO = 4.90;
+    private final Map<FormaPagamento, GatewayPagamento> gateways;
 
-    public ResultadoCobranca cobrar(Pedido pedido, FormaPagamento forma,
-                                     boolean aplicarDescontoFidelidade,
-                                     boolean aplicarJurosParcelamento,
-                                     boolean aplicarTaxaInternacional,
-                                     boolean aplicarSeguro) {
-
-        double valorFinal = calcularValorFinal(pedido.getValorBase(), aplicarDescontoFidelidade,
-                aplicarJurosParcelamento, aplicarTaxaInternacional, aplicarSeguro);
-
-        if (forma == FormaPagamento.BOLETO || forma == FormaPagamento.PIX) {
-            GatewayPagamentoInterno gateway = new GatewayPagamentoInterno();
-            return gateway.cobrar(pedido.getId(), pedido.getCliente(), valorFinal, forma);
-
-        } else if (forma == FormaPagamento.CARTAO_CREDITO) {
-            PaySecureGateway gateway = new PaySecureGateway();
-
-            Map<String, Object> dadosTransacao = new HashMap<>();
-            dadosTransacao.put("orderId", pedido.getId());
-            dadosTransacao.put("customerName", pedido.getCliente());
-            dadosTransacao.put("amount", valorFinal);
-            dadosTransacao.put("currency", "BRL");
-
-            try {
-                TransacaoExterna transacao = gateway.processarTransacao(dadosTransacao);
-                String status = transacao.getCodigoStatus() == 200 ? "APROVADA" : "RECUSADA";
-                return new ResultadoCobranca(pedido.getId(), valorFinal, status, transacao.getReferenciaExterna(), forma);
-
-            } catch (GatewayIndisponivelException e) {
-                return new ResultadoCobranca(pedido.getId(), valorFinal, "RECUSADA", null, forma);
-            }
-
-        } else {
-            throw new IllegalArgumentException("Forma de pagamento nao suportada: " + forma);
-        }
+    public CobrancaService() {
+        this.gateways = new HashMap<>();
+        
+        // Registro dos adaptadores de pagamento (Design Pattern: Adapter)
+        GatewayPagamento internoAdapter = new GatewayPagamentoInternoAdapter();
+        this.gateways.put(FormaPagamento.BOLETO, internoAdapter);
+        this.gateways.put(FormaPagamento.PIX, internoAdapter);
+        this.gateways.put(FormaPagamento.CARTAO_CREDITO, new PaySecureGatewayAdapter());
+        this.gateways.put(FormaPagamento.CARTEIRA_DIGITAL, new WalletPayAdapter());
     }
 
-    public List<ResultadoCobranca> cobrarEmLote(List<Pedido> pedidos, FormaPagamento forma,
-                                                  boolean aplicarDescontoFidelidade,
-                                                  boolean aplicarJurosParcelamento,
-                                                  boolean aplicarTaxaInternacional,
-                                                  boolean aplicarSeguro) {
+    /**
+     * Efetua a cobrança de um único pedido.
+     * Monta a cadeia do Decorator dinamicamente com os booleans enviados pela Main.
+     */
+    public ResultadoCobranca cobrar(Pedido pedido, FormaPagamento forma, 
+                                    boolean descontoFidelidade, boolean jurosParcelamento, 
+                                    boolean taxaInternacional, boolean seguro) {
+        
+        // 1. Iniciamos a base do decorator injetando o valor bruto original do pedido
+        CalculadorValor calculador = new CalculadorValorBase(pedido.getValorBase());
 
+        // 2. Envelopamos dinamicamente na cadeia conforme as escolhas vindas da Main
+        // IMPORTANTE: Se o nome das suas classes de decorator na pasta 'decorator' 
+        // for ligeiramente diferente, ajuste os nomes dos "new" abaixo!
+        if (descontoFidelidade) {
+            calculador = new DescontoFidelidadeDecorator(calculador); 
+        }
+        if (jurosParcelamento) {
+            calculador = new JurosParcelamentoDecorator(calculador); 
+        }
+        if (taxaInternacional) {
+            calculador = new TaxaInternacionalDecorator(calculador); 
+        }
+        if (seguro) {
+            calculador = new SeguroDecorator(calculador); 
+        }
+
+        // 3. Executa o método calcular() processando toda a cadeia de modificações de preço
+        double valorFinal = calculador.calcular();
+
+        // 4. Repassa para o gateway/adapter correto processar o pagamento
+        return processarPagamento(pedido, valorFinal, forma);
+    }
+
+    /**
+     * Efetua a cobrança em lote de todos os pedidos cadastrados na Main.
+     */
+    public List<ResultadoCobranca> cobrarEmLote(List<Pedido> pedidos, FormaPagamento forma, 
+                                                boolean descontoFidelidade, boolean jurosParcelamento, 
+                                                boolean taxaInternacional, boolean seguro) {
         List<ResultadoCobranca> resultados = new ArrayList<>();
 
+        // Reaproveita a lógica de cobrança individual para cada item da lista
         for (Pedido pedido : pedidos) {
-            double valorFinal = calcularValorFinal(pedido.getValorBase(), aplicarDescontoFidelidade,
-                    aplicarJurosParcelamento, aplicarTaxaInternacional, aplicarSeguro);
-
-            if (forma == FormaPagamento.BOLETO || forma == FormaPagamento.PIX) {
-                GatewayPagamentoInterno gateway = new GatewayPagamentoInterno();
-                resultados.add(gateway.cobrar(pedido.getId(), pedido.getCliente(), valorFinal, forma));
-
-            } else if (forma == FormaPagamento.CARTAO_CREDITO) {
-                PaySecureGateway gateway = new PaySecureGateway();
-
-                Map<String, Object> dadosTransacao = new HashMap<>();
-                dadosTransacao.put("orderId", pedido.getId());
-                dadosTransacao.put("customerName", pedido.getCliente());
-                dadosTransacao.put("amount", valorFinal);
-                dadosTransacao.put("currency", "BRL");
-
-                try {
-                    TransacaoExterna transacao = gateway.processarTransacao(dadosTransacao);
-                    String status = transacao.getCodigoStatus() == 200 ? "APROVADA" : "RECUSADA";
-                    resultados.add(new ResultadoCobranca(pedido.getId(), valorFinal, status, transacao.getReferenciaExterna(), forma));
-
-                } catch (GatewayIndisponivelException e) {
-                    resultados.add(new ResultadoCobranca(pedido.getId(), valorFinal, "RECUSADA", null, forma));
-                }
-
-            } else {
-                throw new IllegalArgumentException("Forma de pagamento nao suportada: " + forma);
-            }
+            resultados.add(cobrar(pedido, forma, descontoFidelidade, jurosParcelamento, taxaInternacional, seguro));
         }
 
         return resultados;
     }
-
-    public double calcularValorFinal(double valorBase,
-                                      boolean aplicarDescontoFidelidade,
-                                      boolean aplicarJurosParcelamento,
-                                      boolean aplicarTaxaInternacional,
-                                      boolean aplicarSeguro) {
-
-        double valor = valorBase;
-
-        if (aplicarDescontoFidelidade) {
-            valor = valor - (valor * TAXA_DESCONTO_FIDELIDADE);
+    
+    /**
+     * Método auxiliar para centralizar o redirecionamento ao Adapter correto.
+     */
+    private ResultadoCobranca processarPagamento(Pedido pedido, double valorFinal, FormaPagamento forma) {
+        GatewayPagamento gateway = gateways.get(forma);
+        if (gateway == null) {
+            throw new IllegalArgumentException("Forma de pagamento nao suportada: " + forma);
         }
-
-        if (aplicarJurosParcelamento) {
-            valor = valor + (valor * TAXA_JUROS_PARCELAMENTO);
-        }
-
-        if (aplicarTaxaInternacional) {
-            valor = valor + (valor * TAXA_OPERACAO_INTERNACIONAL);
-        }
-
-        if (aplicarSeguro) {
-            valor = valor + VALOR_SEGURO;
-        }
-
-        return valor;
+        return gateway.processar(pedido, valorFinal, forma);
     }
 }

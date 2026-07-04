@@ -1,9 +1,9 @@
 package br.unicamp.padroesestruturais.legacy;
 
-import br.unicamp.padroesestruturais.legacy.externo.ChargeRequest;
-import br.unicamp.padroesestruturais.legacy.externo.ChargeResponse;
-import br.unicamp.padroesestruturais.legacy.externo.ChargeStatus;
-import br.unicamp.padroesestruturais.legacy.externo.WalletPaySDK;
+import br.unicamp.padroesestruturais.legacy.domain.FormaPagamento;
+import br.unicamp.padroesestruturais.legacy.domain.Pedido;
+import br.unicamp.padroesestruturais.legacy.domain.ResultadoCobranca;
+import br.unicamp.padroesestruturais.legacy.gateway.WalletPayAdapter;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -12,31 +12,35 @@ class WalletPaySDKTest {
 
     @Test
     void deveConfirmarCobrancaDentroDoLimite() {
-        WalletPaySDK sdk = new WalletPaySDK();
+        WalletPayAdapter adapter = new WalletPayAdapter();
+        // 500.0 double será convertido para 50000 centavos internamente
+        Pedido pedido = new Pedido("PED-001", "Joao Silva", "Item", 500.0);
 
-        ChargeResponse resposta = sdk.charge(new ChargeRequest("PED-001", "Joao Silva", 50000));
+        ResultadoCobranca resultado = adapter.processar(pedido, 500.0, FormaPagamento.CARTEIRA_DIGITAL);
 
-        assertEquals(ChargeStatus.CONFIRMED, resposta.getStatus());
-        assertNotNull(resposta.getWalletTransactionId());
-        assertTrue(resposta.getWalletTransactionId().startsWith("WPAY-"));
+        assertEquals("APROVADA", resultado.getStatus());
+        assertNotNull(resultado.getReferencia());
+        assertTrue(resultado.getReferencia().startsWith("WPAY-"));
     }
 
     @Test
     void deveRecusarCobrancaAcimaDoLimite() {
-        WalletPaySDK sdk = new WalletPaySDK();
+        WalletPayAdapter adapter = new WalletPayAdapter();
+        // 15000.0 double será convertido para 1.500.000 centavos, o que ultrapassa o limite da biblioteca
+        Pedido pedido = new Pedido("PED-003", "Construtora ABC Ltda", "Item", 15000.0);
 
-        ChargeResponse resposta = sdk.charge(new ChargeRequest("PED-003", "Construtora ABC Ltda", 1_500_000));
+        ResultadoCobranca resultado = adapter.processar(pedido, 15000.0, FormaPagamento.CARTEIRA_DIGITAL);
 
-        assertEquals(ChargeStatus.DECLINED, resposta.getStatus());
+        assertEquals("RECUSADA", resultado.getStatus());
     }
 
     @Test
     void deveFalharParaValorInvalido() {
-        WalletPaySDK sdk = new WalletPaySDK();
+        WalletPayAdapter adapter = new WalletPayAdapter();
+        Pedido pedido = new Pedido("PED-004", "Cliente X", "Item", 0.0);
 
-        ChargeResponse resposta = sdk.charge(new ChargeRequest("PED-004", "Cliente X", 0));
+        ResultadoCobranca resultado = adapter.processar(pedido, 0.0, FormaPagamento.CARTEIRA_DIGITAL);
 
-        assertEquals(ChargeStatus.FAILED, resposta.getStatus());
-        assertNull(resposta.getWalletTransactionId());
+        assertEquals("RECUSADA", resultado.getStatus());
     }
 }
